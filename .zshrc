@@ -9,7 +9,7 @@
 
 # Returns whether the given command is executable or aliased.
 _has() {
-  return $( whence $1 &>/dev/null )
+  whence $1 &>/dev/null
 }
 
 # Returns whether the given statement executed cleanly. Try to avoid this
@@ -27,19 +27,16 @@ _versionof() {
   fi
 }
 
+_inside_ai_coding_tool() {
+  # Seems to detect Cursor inline terminals as of July 2025
+  [[ -n "$COMPOSER_NO_INTERACTION" || -n "$CLAUDECODE" ]]
+}
+
 # ENVIRONMENT VARIABLES {{{1
 
 if _has less; then
   export PAGER=less
   export LESS='-Ri'
-fi
-
-if [ "$TERM_PROGRAM" = "vscode" ]; then
-  export EDITOR=code VISUAL=less
-elif _has vim; then
-  export EDITOR=vim VISUAL=vim
-elif _has vi; then
-  export EDITOR=vi VISUAL=vi
 fi
 
 # Overridable locale support.
@@ -57,6 +54,9 @@ if [ -w ~/.zsh_history -o -w ~ ]; then
   HISTSIZE=100000
   HISTFILE=~/.zsh_history
 fi
+
+# Shush, brew.
+export HOMEBREW_NO_ENV_HINTS=1
 
 # APPLICATION CUSTOMIZATIONS {{{1
 
@@ -93,7 +93,48 @@ _force_prepend_to_path() {
 _force_prepend_to_path /usr/local/sbin
 _force_prepend_to_path /usr/local/bin
 _force_prepend_to_path ~/bin
+_prepend_to_path ~/go/bin
+_prepend_to_path ~/.local/bin
 _append_to_path /usr/sbin
+
+# Add Homebrew early
+if [ -x /opt/homebrew/bin/brew ]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
+# bun
+[ -s "~/.bun/_bun" ] && source "~/.bun/_bun"
+export BUN_INSTALL="$HOME/.bun"
+_append_to_path "$BUN_INSTALL/bin"
+
+# EDITOR SETUP {{{1
+# Now that PATH is set up, determine which editor to use
+
+if _inside_ai_coding_tool ; then
+  export GIT_PAGER=cat
+  if _has nvim; then
+    export EDITOR=nvim
+    export VISUAL=nvim
+  elif _has vim; then
+    export EDITOR=vim
+    export VISUAL=vim
+  elif _has vi; then
+    export EDITOR=vi
+    export VISUAL=vi
+  fi
+elif [ "$TERM_PROGRAM" = "vscode" ]; then
+  export EDITOR=code
+  export VISUAL=less
+elif _has nvim; then
+  export EDITOR=nvim
+  export VISUAL=nvim
+elif _has vim; then
+  export EDITOR=vim
+  export VISUAL=vim
+elif _has vi; then
+  export EDITOR=vi
+  export VISUAL=vi
+fi
 
 # ALIASES {{{1
 
@@ -106,15 +147,20 @@ alias Arp='sudo apt remove --purge'
 alias As='apt search'
 alias SC='vim ~/.ssh/config'
 alias VU='~/.vim/update.sh'
+alias NVU='~/.config/nvim/update.sh'
 alias ZL='vim -o ~/.zshlocal ~/.zshrc && ZR'
 alias ZR='echo "Restarting zsh..." && exec zsh -l'
 alias ZU='~/.dotfiles/install.zsh && ZR'
 alias ZshInstall='~/.dotfiles/install.zsh && ZR'
 alias ZshRehash='. ~/.zshrc'
-alias aag='agg'
-alias agg='_agg () { rg --group $@ | less }; _agg'
+alias a='aider'
 alias aurl='adb shell am start -a "android.intent.action.VIEW" -d'
+alias b='bat'
 alias bc='bc -l'
+alias bi='bun install'
+alias c='claude --permission-mode acceptEdits'
+alias ca=cursor-agent
+alias cc='claude -c --permission-mode acceptEdits'
 alias co-='git checkout -'
 alias com='git checkout main'
 alias cr2lf="perl -pi -e 's/\x0d/\x0a/gs'"
@@ -126,6 +172,7 @@ alias dcrs='dc pull ; dc down ; dc up -d'
 alias dls='dpkg -L'
 alias dpwd='docker run --rm -v "$(pwd):$(pwd)" -w "$(pwd)" -u "$(id -u):$(id -g)" -it'
 alias dsl='dpkg -l | grep -i'
+alias exifclear='exiftool -overwrite_original -all='
 alias f1="awk '{print \$1}'"
 alias f2="awk '{print \$2}'"
 alias f2k9='f2k -9'
@@ -156,29 +203,35 @@ alias gdc='git diff --cached'
 alias gdd='git difftool'
 alias gdt='git difftool'
 alias gdw='git diff -w'
+alias gdwd='git diff --word-diff'
+alias gec='code $(git diff-index --name-only HEAD)'
 alias gf='git fetch'
 alias gfa='git fetch --all'
-alias gfix='git rebase -i HEAD~10'
 alias gfix2='git rebase -i HEAD~30'
+alias gfix='git rebase -i HEAD~10'
 alias gfixup='git rebase -i HEAD~10'
 alias gfrb='git fetch && git rebase origin/main'
 alias gfrbc='grbc'
-alias gg='git grep'
-alias gh='git stash'
+alias gg='git checkout -'
+alias ggg-='git undo && ggg'
 alias ghl='git stash list'
 alias ghp='git stash pop'
 alias ghs='git stash save'
 alias ghsp='git stash save --patch'
 alias ghw='git stash show -p'
 alias gist='gist -p -c'
+alias gitignoregen='_gitignoregen() { curl -sL "https://www.toptal.com/developers/gitignore/api/$1" }; _gitignoregen'
 alias gk='gitk &>/dev/null'
 alias gl1='git log -n 1'
-alias gl='git quicklog -n 12'
+alias gl='git quicklog -n 10'
 alias glg='git quicklog --grep'
 alias gll='git quicklog-long'
 alias gls='git log --show-signature'
 alias gm='git merge'
-alias gmom='git merge origin'
+alias gmm='git merge --no-edit main'
+alias gmnc='git merge --no-commit'
+alias gmne='git merge --no-edit'
+alias gmom='git merge --no-edit origin/main'
 alias gmt='git mergetool'
 alias gn='git newb'
 alias gp='git push'
@@ -191,46 +244,62 @@ alias gponv='git push origin --no-verify'
 alias gpot='git push origin --tags'
 alias gpox='git push origin &>/dev/null & ; disown'
 alias grb='git rebase'
+alias grba='git rebase --abort'
 alias grbc='GIT_EDITOR=true git rebase --continue'
 alias grbi='git rebase -i'
 alias grbs='git rebase --skip'
+alias grm='git reset main'
 alias gs='git show -p'
 alias gsm='git submodule'
+alias gsmo='git branch -f main origin/main'
 alias gsmu='git submodule update --init --recursive'
 alias gss='git show -p --stat'
 alias gt='git tag'
 alias gu='git unstage'
+alias gun='git unstage'
 alias gundo='git undo'
-alias gup='git up'
+alias gup='git up "$(git branch --show-current)"'
 alias gus='git unstage'
-alias gvc='vim `git diff --name-only --diff-filter=U`'
-alias gvm='vim `git diff --name-only --diff-filter=M`'
+gvc() {
+  local editor=$(_editor)
+  $editor `git diff --name-only --diff-filter=U`
+}
+gvm() {
+  local editor=$(_editor)
+  $editor `git diff --name-only --diff-filter=M`
+}
 alias gz='git undo'
 alias h='heroku'
 alias i4='sed "s/^/    /"'
 alias icat='imgcat'
 alias ils='imgls'
 alias iurl='xcrun simctl openurl booted'
-alias jqi='_jqi () { echo "" | fzf --print-query --preview "cat $@ | jq {q}" }; _jqi'
+alias jqi='_jqi() { echo "" | fzf --print-query --preview "cat $@ | jq {q}" }; _jqi'
 alias k='tree -h'
 alias l="ls -lh"
 alias lg='l --git'
 alias ll="l -a"
 alias lt='ls -lt'
 alias ltr='ls -ltr'
+alias md='glow -p'
 alias nerdcrap='cat /dev/urandom | xxd | grep --color=never --line-buffered -E "00 00[0-2]"'
+alias netopen='lsof -iTCP -sTCP:LISTEN -P'
+alias netwhat='_netwhat() { lsof -P -i:$* | sed 1d }; _netwhat'
 alias nohist='HISTFILE='
 alias notifydone='terminal-notifier -message Done.'
+alias o=ollama
 alias p1='patch -p1'
 alias p='pnpm'
+alias pg_dump_cleanup="sed -e '/^$/d' -e '/^--/d' -e '/^SET/d'"
 alias pi='pnpm install'
 alias pkgcat='lsbom -f -l -s -pf'
 alias pkginstall='sudo installer -target / -pkg'
 alias pkgls='ls /var/db/receipts/'
+alias pnpm-update-everything='pnpm up --latest ; pnpm update ; pnpm self-update ; pnpm install'
 alias pt='pstree -pul'
 alias rake='noglob rake'
 alias randnum='python -S -c "import random; print(random.SystemRandom().randrange(10**7,10**8))"'
-alias rgg='_rgg () { rg --color always --heading $@ | less }; _rgg'
+alias rgg='_rgg() { rg --color always --heading $@ | $PAGER }; _rgg'
 alias ri='ri -f ansi'
 alias rls='screen -ls'
 alias rrg='rgg'
@@ -245,16 +314,19 @@ alias t='tmux attach'
 alias tree="tree -F -A -I CVS"
 alias tt='tail -n 9999'
 alias urls="grep -Eo 'https?://[^ ]+' | sed 's/[^a-zA-Z0-9/:?&._=-]//g'"
-alias vb=VBoxManage
-alias vh=VBoxHeadless
+alias ve='source .venv/bin/activate ; rehash'
 alias vimsql="vim -c 'set ft=sql'"
 alias wgetdir='wget -r -l1 -P035 -nd --no-parent'
 alias wip='git add -A ; git commit --all --no-verify -m WIP'
-alias x='screen -A -x'
+alias x='bat'
 alias yad='yarn add -D'
 alias ye='yarn exec'
 alias yeshist='HISTFILE=~/.zsh_history'
+alias youtube-dl='yt-dlp'
 alias yrd='yarn remove -D'
+alias ytdl-audio='yt-dlp -x'
+alias ytdl-subtitles='yt-dlp --write-sub --write-auto-sub --skip-download'
+alias ytdl='yt-dlp'
 
 # Interactive/verbose commands.
 alias mv='mv -i'
@@ -267,6 +339,11 @@ if [ -n "$VSCODE_IPC_HOOK_CLI" ]; then
   alias vi=code
   alias vim=code
   alias gvim=code
+elif _has nvim; then
+  alias vi=nvim
+  alias vim=nvim
+  vs() { nvim +"NERDTree $1" }
+  gvs() { nvim +"NERDTree $1" }
 elif _has vim; then
   alias vi=vim
   vs() { vim +"NERDTree $1" }
@@ -316,33 +393,24 @@ elif _try df -h ~; then
   alias df='df -h'
 fi
 
-# We should definitely have Gnu coreutils, right?
-if _try ls --color; then
-  alias ls='ls --color'
-fi
-
 # strace-like equivalent on macOS
 if _has dtruss && ! _has strace; then
   alias strace='sudo dtruss -f sudo -u $USER'
 fi
 
-# eza is a fancy replacement for ls
 if _has eza ; then
+  # eza is a fancy replacement for ls
   alias ls=eza
   alias l='ls -lg'
   alias ltr='eza -lgr -sold'
+elif _try ls --color; then
+  # We should definitely have Gnu coreutils, right?
+  alias ls='ls --color'
 fi
 
 # Try to get some version of tac
 if ! _has tac && _has gtac ; then
   alias tac=gtac
-fi
-
-# What's using that TCP port?
-if [ "$(uname -s)" = "Darwin" ]; then
-  alias netwhat='sudo lsof -Pni tcp'
-else
-  alias netwhat='lsof -i +c 40'
 fi
 
 # Let me know when commands are done by prepending `;b` to things.
@@ -364,8 +432,8 @@ for cmd in convert heif-convert heif-enc heif-info heif-thumbnailer identify img
     alias $cmd="dpwd --entrypoint=$cmd dpokidov/imagemagick"
   fi
 done
-if ! _has youtube-dl ; then
-  alias youtube-dl='dpwd w33ble/youtube-dl'
+if ! _has yt-dlp ; then
+  alias youtube-dl='dpwd ghcr.io/jim60105/yt-dlp'
 fi
 if ! _has svgo ; then
   alias svgo='dpwd skhaz/svgo'
@@ -384,12 +452,83 @@ if [ -e /Applications/Tailscale.app/Contents/MacOS/Tailscale ]; then
   alias tailscale='/Applications/Tailscale.app/Contents/MacOS/Tailscale'
 fi
 
+# Default to nslookup if host is missing (Alpine linux)
+if ! _has host ; then
+  alias host=nslookup
+fi
+
 # FUNCTIONS {{{1
+
+# Generic helper to ask an LLM about anything - install glow for best results
+# Requires `llm`: https://llm.datasette.io/en/stable/
+ask() {
+  if [ $# = 0 ]; then
+    echo "usage: ask <some question>"
+    return 1
+  fi
+  if ! _has llm; then
+    echo "llm tool not installed, run 'uv tool install llm'"
+    return
+  fi
+  local formatter=cat
+  if _has glow; then
+    formatter=glow
+  elif _has md2term; then
+    formatter=md2term
+  fi
+  local system_prompt="We are on the command line for a system identified as \`$(uname -a)\` with locale \`$LANG\`. Answer the following question. Be brief and concise."
+  llm prompt -s "$system_prompt" "$*" | eval $formatter
+}
+
+# Ask an LLM with WebSearch tool enabled
+# Requires `llm`: https://llm.datasette.io/en/stable/
+# (I suggest `llm install llm-tools-exa` and getting a key from exa.ai)
+askw() {
+  if [ $# = 0 ]; then
+    echo "usage: ask-web <some question>"
+    return 1
+  fi
+  if ! _has llm; then
+    echo "llm tool not installed, run 'uv tool install llm'"
+    return
+  fi
+  if ! llm tools list | grep -q web_search; then
+    echo "web_search tool not available in llm"
+    return 1
+  fi
+  local formatter=cat
+  if _has glow; then
+    formatter=glow
+  elif _has md2term; then
+    formatter=md2term
+  fi
+  local system_prompt="We are on the command line for a system identified as \`$(uname -a)\` with locale \`$LANG\`. Search the web and answer the following question. Be brief and concise."
+  llm prompt -T web_search -s "$system_prompt" "$*" | eval $formatter
+}
+
+# AI helper for command line syntax, like "list subprocesses of pid 1234"
+# Requires `llm`: https://llm.datasette.io/en/stable/
+cmd() {
+  if [ $# = 0 ]; then
+    echo "usage: cmd <some command description>"
+    return 1
+  fi
+  if ! _has llm; then
+    echo "llm tool not installed, run 'uv tool install llm'"
+    return
+  fi
+  local system_prompt="We are on the command line for a system identified as \`$(uname -a)\` with locale \`$LANG\` using shell \`$SHELL\`. Show me a command line command for the following in a code block. Be brief and concise. No comments."
+  local cmd
+  cmd=$(llm prompt -x -s "$system_prompt" "$*")
+
+  # Insert the command into the command line buffer
+  print -z "$cmd"
+}
 
 # Generate passwords
 randpass() {
   local len=${1:-32}
-  openssl rand -base64 256 | tr -d '\n/+='| cut -c -$len
+  python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 }
 
 # Latest file in a directory or that matches a pattern.
@@ -417,22 +556,37 @@ yr() {
 
 # ack is really useful. I usually look for code and then edit all of the files
 # containing that code. Changing `ack' to `vack' does this for me.
+_editor() {
+  if _has nvim; then
+    echo nvim
+  elif _has vim; then
+    echo vim
+  else
+    echo vi
+  fi
+}
 if _has rg; then
   vack() {
-    vim `rg --color=never -l $@`
+    local editor=$(_editor)
+    $editor `rg --color=never -l $@`
   }
 elif _has ag; then
   vack() {
-    vim `ag --nocolor -l $@`
+    local editor=$(_editor)
+    $editor `ag --nocolor -l $@`
   }
 else
   vack() {
-    vim `ack -l $@`
+    local editor=$(_editor)
+    $editor `ack -l $@`
   }
 fi
 alias vag=vack
 alias vrg=vack
-vgg() { vim `gg -l $@` }
+vgg() {
+  local editor=$(_editor)
+  $editor `gg -l $@`
+}
 
 # Quick commands to sync CWD between terminals.
 pin() {
@@ -484,13 +638,6 @@ makecommand() {
   vix $cmd
 }
 
-rxvt-title() {
-  echo -n "]2;$*"
-}
-
-screen-title() {
-  echo -n "k$*\\"
-}
 
 # Commit what's been staged, use args as message.
 gc() {
@@ -510,21 +657,63 @@ sci() {
   hr done
 }
 
+# Commit all using a generated commit message
+ggg() {
+  if ! git status --porcelain | grep -q . ; then
+    echo "Nothing to commit."
+    return 1
+  fi
+  if ! _has llm; then
+    echo "llm tool not installed, run 'uv tool install llm'"
+    return 1
+  fi
+  git add -A && \
+  hr staging && \
+  git status && \
+  hr committing && \
+  local msg=$(llm -x -s 'Summarize this git diff and produce a single sentence in a code block we can use for a commit message' -f <(git diff ; git diff --cached) | tr -d '\n') && \
+  git commit -m "$msg" && \
+  hr results && \
+  git --no-pager quicklog && \
+  hr done
+}
+
 # Interactive git checkout with most recent branches last
 gco() {
-  local selected=$(_fzf_git_each_ref --no-multi --sort=committerdate)
-  [ -n "$selected" ] && git checkout "$selected"
-  return
-
-  local branch="$(git branch --sort=committerdate | tr -d '* ' | fzf --tac)"
-  if [ "$?" != "0" ] || [ "$branch" = "" ]; then
-    return
-  fi
-  git checkout "$branch"
+  _fzf_git_each_ref --no-multi | xargs git checkout
 }
 
 dance() {
-  perl -e'$|++;@x=qw[/ | \\  |];$_=0;do{print"\e[9D:D-$x[$_++%4]-<"}while(sleep $|)'
+  perl -e'$|++;@x=qw[🯅 🯆 🯇 🯈];$_=0;do{print"\e[9D$x[$_++%4] ";sleep 1}while(1)'
+}
+
+randomize() {
+  for arg in $(printf "%s\n" "$@" | sort -R); do
+    echo "$arg"
+  done
+}
+
+# pastes when used as a source, copies when used as a destination, like `clip | jq | clip`
+clip () {
+  [ -t 0 ] && pbpaste || pbcopy
+}
+
+quote_clipboard() {
+  local content=$(pbpaste)
+
+  # Check if content already starts with "> "
+  if [[ "${content:0:2}" == "> " ]]; then
+    echo "Content already quoted"
+  else
+    # Add "> " to each line
+    echo "$content" | sed 's/^/> /' | pbcopy
+    echo "Added quotes to clipboard content"
+  fi
+}
+
+dedent() {
+  pbpaste | sed 's/^[[:space:]]*//' | pbcopy
+  echo "Removed leading whitespace from clipboard content"
 }
 
 # ZSH-SPECIFIC COMPLETION {{{1
@@ -555,7 +744,12 @@ zstyle ':completion:*' use-perl true
 zstyle :compinstall filename '/Users/ian/.zshrc'
 
 autoload -Uz compinit
-compinit -u
+# Only regenerate compinit dump once per day
+if [[ -n ~/.zcompdump(#qN.mh+24) ]]; then
+  compinit
+else
+  compinit -C
+fi
 # End of lines added by compinstall
 # ---------------------------------------------
 
@@ -602,12 +796,12 @@ zle -N self-insert url-quote-magic
 bindkey -e
 
 # One keystroke to cd ..
-bindkey -s '\eu' '\eq^Ucd ..; ls^M'
-bindkey -s '¨' '\eq^Ucd ..; ls^M'
+bindkey -s '\eu' '\eq^Ucd ..; ls^M^U^U'
+#bindkey -s '¨' '\eq^Ucd ..; ls^M^U^U'
 
 # Smart less-adder
-bindkey -s "\el" "^E 2>&1|less^M"
-bindkey -s "¬" "^E 2>&1|less^M"
+bindkey -s "\el" "^E 2>&1|$PAGER^M"
+bindkey -s "¬" "^E 2>&1|$PAGER^M"
 
 # This lets me use ^Z to toggle between open text editors.
 bindkey -s '^Z' '^Ufg^M'
@@ -664,6 +858,9 @@ unsetopt bang_hist
 unsetopt extended_history
 setopt hist_ignore_space
 
+# Trim whitespace from history
+eval 'function zadd { history -w --trim; }'
+
 # Job Control
 setopt notify
 
@@ -689,7 +886,7 @@ local __newline="
 if [ "$EUID" = "0" ]; then
   __sigil="# "
 elif `echo $LANG | grep -E -i 'utf-?8' &>/dev/null`; then
-  __sigil="〉"
+  __sigil="❯ "
 else
   __sigil="%# "
 fi
@@ -711,12 +908,17 @@ noblinkroot() {
 # command: A command to run, like '$(_versionof node)'
 #
 colorprompt() {
+  if _inside_ai_coding_tool ; then
+    simpleprompt
+    return
+  fi
+
   __prompt_mode=${1:-0}
   __extra="$2"
   local -a line1
   line1=(
     "%{[${__prompt_mode}m%}%n@%m:%~"
-    "%(1j.%{[36;1m%} ● %j jobs%{[0m%}.)"
+    "%(1j.%{[36;1m%} ◝ %j jobs%{[0m%}.)"
     "%(?..%{[31;1m%} ▲ error %?%{[0m%})"
     "%{[30;1m%} ${__extra} %{[0m%}"
   )
@@ -746,7 +948,7 @@ uncolorprompt() {
     "%n $__sigil "
   )
   bindkey "^L" clear-screen
-  unfunction precmd &>/dev/null
+  precmd() {}
   PS1=${(j::)temp}
 }
 
@@ -755,17 +957,26 @@ randomcolorprompt() {
   colorprompt "38;5;$color"
 }
 
+# Just show our prompt character with colors.
+# Add an extra line between commands for better copying into docs.
 shortprompt() {
   __prompt_mode=${__prompt_mode:-0}
   bindkey "^L" clear-screen
-  unfunction precmd &>/dev/null
+  precmd() {
+    echo
+  }
   PS1="%{[${__prompt_mode}m%}$%{[0m%} "
 }
 
+# Just show `$` as a prompt character, no color.
+# Add an extra line between commands for better copying into docs.
 simpleprompt() {
   __prompt_mode=${__prompt_mode:-0}
   bindkey "^L" clear-screen
   unfunction precmd &>/dev/null
+  precmd() {
+    echo
+  }
   PS1="$ "
 }
 
@@ -788,21 +999,22 @@ if [ -e "$HOME/.ssh/config" -a ! -e "$HOME/.ssh/skip-host-aliases" ]; then
   done
 fi
 
-# Fix SSH auth socket location so agent forwarding works with tmux.
-if test "$SSH_AUTH_SOCK" ; then
-  ln -sf $SSH_AUTH_SOCK ~/.ssh/ssh_auth_sock
-fi
+# Refresh SSH_AUTH_SOCK from tmux before each command so agent forwarding works.
+_refresh_ssh_auth_sock() {
+  if [[ -n "$TMUX" ]]; then
+    local new_sock=$(tmux show-environment 2>/dev/null | grep "^SSH_AUTH_SOCK" | cut -d= -f2)
+    if [[ -n "$new_sock" && -S "$new_sock" ]]; then
+      export SSH_AUTH_SOCK="$new_sock"
+    fi
+  fi
+}
+preexec_functions+=(_refresh_ssh_auth_sock)
 
 # FZF {{{1
 
-for dir in ~/.fzf /usr/share/fzf /usr/local/opt/fzf/shell /opt/homebrew/opt/fzf/shell ; do
-  if [ -e $dir ]; then
-    [ -e $dir/completion.zsh ] && source $dir/completion.zsh
-    [ -e $dir/key-bindings.zsh ] && source $dir/key-bindings.zsh
-    [ -e $dir/../bin ] && _append_to_path $dir/../bin
-    break
-  fi
-done
+if _has fzf; then
+  source <(fzf --zsh)
+fi
 
 if _has rg; then
   export FZF_DEFAULT_COMMAND='rg --files --hidden --follow --glob "!.git/*"'

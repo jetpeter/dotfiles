@@ -49,7 +49,7 @@ nmap k gk
 nnoremap ' `
 
 " You don't know what you're missing if you don't use this.
-nmap <C-e> :e#<CR>
+nnoremap <C-e> :e#<CR>
 
 " Move between open buffers.
 nmap <C-n> :bnext<CR>
@@ -434,7 +434,7 @@ colorscheme molokai
 let g:seoul256_background = 233
 if !has('gui_running')
   let g:solarized_termcolors = 256
-  if $TERM == "xterm-256color" || $TERM == "screen-256color" || $COLORTERM == "gnome-terminal"
+  if $TERM == "xterm-256color" || $TERM == "screen-256color" || $COLORTERM == "gnome-terminal" || $TERM == "xterm-ghostty"
     set t_Co=256
   elseif has("terminfo")
     colorscheme default
@@ -517,6 +517,8 @@ au BufNewFile,BufRead /tmp/crontab* setf crontab
 au BufNewFile,BufRead COMMIT_EDITMSG setlocal nolist nonumber
 au BufNewFile,BufRead Makefile setlocal nolist
 au BufNewFile,BufRead dist/* set ft=text
+au BufNewFile,BufRead Caddyfile setlocal nolist ts=4 sw=4 noet
+au BufNewFile,BufRead *crontabs* setf crontab
 
 au FileType gitcommit setlocal nolist ts=4 sts=4 sw=4 noet
 au FileType inform7 setlocal nolist tw=0 ts=4 sw=4 noet foldlevel=999
