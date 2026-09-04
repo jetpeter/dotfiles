@@ -22,4 +22,9 @@ working-directory = home
 # Also fix TERM when using SSH
 shell-integration-features = no-cursor, ssh-env
 
+unfocused-split-opacity = 1
+split-divider-color = #5e81ac
+
 keybind = shift+enter=text:\x1b\r
+
+keybind = cmd+shift+i=prompt_tab_title

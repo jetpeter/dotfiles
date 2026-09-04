@@ -25,6 +25,73 @@ if not vim.uv.fs_stat(lazypath) then
 end
 vim.opt.rtp:prepend(lazypath)
 
+-- Obsidian vault location is host-specific (different on each machine, or
+-- absent entirely). Probe $OBSIDIAN_VAULT and a few common paths; return the
+-- first that actually exists, or nil. Used to enable obsidian.nvim only when
+-- there's a vault, so machines without notes don't see a startup error.
+local function obsidian_vault()
+  local candidates = { '~/dev/notes', '~/Obsidian/Notes' }
+  -- $OBSIDIAN_VAULT wins, but add it via insert — a nil first element in a
+  -- table literal makes a hole that stops ipairs() before it checks the rest.
+  if vim.env.OBSIDIAN_VAULT and vim.env.OBSIDIAN_VAULT ~= '' then
+    table.insert(candidates, 1, vim.env.OBSIDIAN_VAULT)
+  end
+  for _, path in ipairs(candidates) do
+    local expanded = vim.fn.expand(path)
+    if vim.fn.isdirectory(expanded) == 1 then
+      return expanded
+    end
+  end
+  return nil
+end
+
+-- Resolve the vault once at startup so cond, the keymap, and the workspace
+-- path all agree. A plain boolean/string is more predictable for lazy than a
+-- cond function it evaluates later.
+local obsidian_path = obsidian_vault()
+
+-- Bind <C-]> to follow-link in every markdown buffer, but only when a vault
+-- exists (otherwise obsidian.nvim never loads and :Obsidian wouldn't exist).
+-- Registered here at startup — not in the plugin's config — so the mapping is
+-- in place before the first markdown buffer triggers lazy-loading. (Doing it
+-- in config misses that first buffer, whose FileType event already fired.)
+if obsidian_path then
+  vim.api.nvim_create_autocmd('FileType', {
+    pattern = 'markdown',
+    callback = function(ev)
+      vim.keymap.set('n', '<C-]>', '<cmd>Obsidian follow_link<cr>',
+        { buffer = ev.buf, desc = 'Obsidian: follow link under cursor' })
+      -- Toggle the checkbox on the current line from anywhere on it.
+      vim.keymap.set('n', '<Leader>x', '<cmd>Obsidian toggle_checkbox<cr>',
+        { buffer = ev.buf, desc = 'Obsidian: toggle checkbox on line' })
+      -- Open a fresh unchecked checkbox below the current line (insert mode).
+      vim.keymap.set('n', '<Leader>o', 'o- [ ] ',
+        { buffer = ev.buf, desc = 'Obsidian: new checkbox below' })
+      -- The UI's concealed rendering (wikilinks, etc.) needs conceallevel >= 1,
+      -- and obsidian.nvim warns if it's lower. Scope it to markdown buffers.
+      vim.opt_local.conceallevel = 2
+      -- Autosave, like a native notes app — but only for files actually inside
+      -- the vault, not every markdown buffer. Write on insert-leave, any edit,
+      -- or when leaving the buffer/losing focus. `silent update` only writes if
+      -- there are unsaved changes, so it's cheap to fire often.
+      local fname = vim.api.nvim_buf_get_name(ev.buf)
+      if fname:sub(1, #obsidian_path) == obsidian_path then
+        vim.api.nvim_create_autocmd(
+          { 'InsertLeave', 'TextChanged', 'FocusLost', 'BufLeave' },
+          {
+            buffer = ev.buf,
+            callback = function()
+              if vim.bo[ev.buf].modifiable and not vim.bo[ev.buf].readonly
+                 and vim.bo[ev.buf].buftype == '' then
+                vim.cmd('silent update')
+              end
+            end,
+          })
+      end
+    end,
+  })
+end
+
 require('lazy').setup({
   -- File Explorer
   {
@@ -54,10 +121,12 @@ require('lazy').setup({
     cmd = { 'DiffviewOpen', 'DiffviewClose', 'DiffviewFileHistory' },
   },
 
-  -- Syntax Highlighting
+  -- Syntax highlighting (parsers; highlighting itself is built-in on nvim 0.12+)
+  -- Parsers are installed by ./parsers.sh, not at startup, so we don't pay for
+  -- async installs on every launch (they couldn't finish before nvim exited).
   {
-    'nvim-treesitter/nvim-treesitter',
-    build = ':TSUpdate',
+    'romus204/tree-sitter-manager.nvim',
+    opts = {},
   },
   {
     'windwp/nvim-ts-autotag',
@@ -67,8 +136,8 @@ require('lazy').setup({
 
   -- LSP and Completion
   'neovim/nvim-lspconfig',
-  'williamboman/mason.nvim',
-  'williamboman/mason-lspconfig.nvim',
+  'mason-org/mason.nvim',
+  'mason-org/mason-lspconfig.nvim',
   {
     'hrsh7th/nvim-cmp',
     dependencies = {
@@ -123,6 +192,31 @@ require('lazy').setup({
   -- Colors
   'tomasr/molokai',
   'lancewilhelm/horizon-extended.nvim',
+
+  -- Obsidian notes: follow [[wikilinks]] with <C-]>.
+  -- Only loads when obsidian_vault() finds a real vault (see helper above), so
+  -- hosts without a notes directory get no plugin and no error.
+  {
+    'obsidian-nvim/obsidian.nvim',
+    version = '*',
+    ft = 'markdown',
+    cond = obsidian_path ~= nil,
+    dependencies = { 'nvim-lua/plenary.nvim' },
+    opts = {
+      workspaces = {
+        { name = 'notes', path = obsidian_path },
+      },
+      -- Don't hijack <CR>/gf globally; <C-]> is bound at startup (above).
+      legacy_commands = false,
+      -- Inline markdown rendering (concealed wikilinks, checkboxes, etc.).
+      ui = { enable = true },
+      -- Don't auto-inject/manage YAML frontmatter on every note we touch.
+      frontmatter = { enabled = false },
+      -- Only cycle checkboxes between unchecked and done, not the default
+      -- { " ", "~", "!", ">", "x" } set of intermediate states.
+      checkbox = { order = { ' ', 'x' } },
+    },
+  },
 }, {
   install = {
     colorscheme = { 'molokai', 'horizon-extended' },
@@ -151,6 +245,18 @@ opt.relativenumber = true
 
 -- File handling
 opt.autoread = true
+-- autoread only reloads when nvim happens to run a filesystem check, which it
+-- rarely does on its own. Nudge it with :checktime whenever we regain focus,
+-- switch buffers, or sit idle. nvim won't clobber a buffer we've modified — it
+-- warns instead — so this only reloads files we haven't changed ourselves.
+vim.api.nvim_create_autocmd({ 'FocusGained', 'BufEnter', 'CursorHold', 'CursorHoldI' }, {
+  group = vim.api.nvim_create_augroup('auto_reload', { clear = true }),
+  callback = function()
+    if vim.fn.mode() ~= 'c' and vim.fn.getcmdwintype() == '' then
+      vim.cmd('checktime')
+    end
+  end,
+})
 opt.autowrite = true
 opt.directory:remove('.')
 opt.fileformats = { 'unix', 'dos', 'mac' }
@@ -204,6 +310,8 @@ opt.clipboard = 'unnamedplus'
 
 -- Security
 opt.modeline = false
+opt.modelineexpr = false
+opt.exrc = false
 
 -- Visual/audio
 opt.visualbell = true
@@ -259,8 +367,8 @@ map('n', '\\R', ':source $MYVIMRC<CR>:echo "init.lua reloaded"<CR>')
 map('n', '\\x', ':cclose<CR>')
 map('n', '\\z', ':w<CR>:!open %<CR><CR>')
 
--- Git toggle
-map('n', '\\g', '<cmd>lua pcall(function() require("gitsigns").toggle() end)<CR>')
+-- Git hunk preview (inline)
+map('n', '\\g', '<cmd>lua pcall(function() require("gitsigns").preview_hunk_inline() end)<CR>')
 
 -- Diffview toggle (git changes sidebar)
 map('n', '\\d', function()
@@ -342,6 +450,11 @@ map('n', 'q:', '<Nop>', { silent = true })
 
 -- Telescope mappings
 map('n', ';', '<cmd>Telescope find_files<CR>')
+map('n', '<Leader>;', function()
+  require('telescope.builtin').find_files({
+    find_command = { 'rg', '--files', '--follow', '--hidden', '--no-ignore', '-g', '!{.git,node_modules}/*' },
+  })
+end)
 map('n', '<Leader>r', '<cmd>Telescope tags<CR>')
 map('n', '<Leader>t', '<cmd>Telescope find_files<CR>')
 map('n', '<Leader>a', '<cmd>Telescope live_grep<CR>')
@@ -538,6 +651,7 @@ pcall(function()
     },
     filters = {
       dotfiles = false,
+      git_ignored = false,
     },
   })
 end)
@@ -608,26 +722,6 @@ pcall(function()
       delete = { text = '▎' },
       topdelete = { text = '▎' },
       changedelete = { text = '•' },
-    },
-  })
-end)
-
--- treesitter
-pcall(function()
-  require('nvim-treesitter.configs').setup({
-    ensure_installed = {
-      'lua', 'vim', 'vimdoc', 'query',
-      'javascript', 'typescript', 'html', 'css', 'json',
-      'markdown', 'markdown_inline', 'python', 'bash', 'yaml', 'ruby',
-      'xml', 'glsl', 'sass', 'scss', 'mermaid',
-    },
-    sync_install = false,
-    auto_install = true,
-    highlight = {
-      enable = true,
-    },
-    indent = {
-      enable = true,
     },
   })
 end)

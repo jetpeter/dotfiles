@@ -1,0 +1,33 @@
+# Ghostty config for playing NetHack on alt.org.
+#
+# Launch with:
+#     ghostty --config-file=~/.confg/ghostyy/nethack
+
+font-family            = PT Mono
+font-style             = Bold
+font-style-bold        = Bold
+font-style-italic      = Italic
+font-style-bold-italic = Bold Italic
+font-size              = 20
+font-feature           = -liga, -calt
+
+theme            = Argonaut
+palette          = 0=#595959
+palette          = 8=#8c8c8c
+cursor-style     = block
+window-padding-x = 8
+window-padding-y = 8
+
+initial-window = true
+window-save-state = never
+window-width  = 143
+window-height = 39
+
+macos-icon = retro
+
+term = xterm-256color
+
+command = /bin/sh -c "ssh -o SetEnv=DGLAUTH=$(/opt/homebrew/bin/op read 'op://Private/y5bhkn6cgfhbdc66c3c3k5wrdq/dglauth') nao"
+wait-after-command = false
+confirm-close-surface = false
+quit-after-last-window-closed = true
